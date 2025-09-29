@@ -1,0 +1,163 @@
+---
+import Base from '../layouts/Base.astro'
+import { fetchGraphQL } from '../lib/graphql'
+import { GET_PROMPTS } from '../lib/queries'
+import PromptCard from '../components/PromptCard.astro'
+
+let nodes: any[] = []
+let after: string | null = null
+let hasNext = true
+
+try {
+  while (hasNext) {
+    const data: any = await fetchGraphQL(GET_PROMPTS, { first: 100, after })
+    const pageNodes = data?.prompts?.nodes ?? []
+    nodes = nodes.concat(pageNodes)
+    hasNext = !!data?.prompts?.pageInfo?.hasNextPage
+    after = data?.prompts?.pageInfo?.endCursor ?? null
+    if (!after) break
+  }
+} catch (e) {
+  nodes = []
+}
+
+const prompts = nodes
+const categories = Array.from(new Set(prompts.flatMap((p) => (p?.categories?.nodes ?? []).map((c) => c.name)))).sort()
+const tags = Array.from(new Set(prompts.flatMap((p) => (p?.tags?.nodes ?? []).map((t) => t.name)))).sort()
+---
+
+<Base title="SpuntoAI — Prompt Library">
+  <section class="mb-8">
+    <h1 class="text-3xl md:text-4xl font-bold mb-3">Libreria di Prompt</h1>
+    <p class="text-neutral-300">Ricerca, filtra e scopri prompt pronti all’uso dal tuo WordPress headless.</p>
+  </section>
+
+  <section class="grid md:grid-cols-4 gap-6">
+    <aside class="md:col-span-1 card p-4 h-max sticky top-24">
+      <h2 class="font-semibold mb-3">Filtri</h2>
+      <div class="mb-4">
+        <label class="block text-sm mb-2">Cerca</label>
+        <input id="search" class="input" type="search" placeholder="Cerca per titolo, testo, tag..." />
+      </div>
+      {categories.length > 0 && (
+        <div class="mb-4">
+          <label class="block text-sm mb-2">Categorie</label>
+          <div class="flex flex-wrap gap-2" id="filters-categories">
+            {categories.map((c) => (
+              <label class="badge cursor-pointer">
+                <input type="checkbox" value={c} class="mr-2 align-middle" /> {c}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      {tags.length > 0 && (
+        <div class="mb-2">
+          <label class="block text-sm mb-2">Tag</label>
+          <div class="flex flex-wrap gap-2" id="filters-tags">
+            {tags.map((t) => (
+              <label class="badge cursor-pointer opacity-80">
+                <input type="checkbox" value={t} class="mr-2 align-middle" /> #{t}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      <button id="clear-filters" class="mt-3 btn bg-neutral-800 border border-neutral-700 text-neutral-100">Pulisci filtri</button>
+    </aside>
+
+    <div class="md:col-span-3">
+      <div class="flex items-center justify-between mb-3 text-sm text-neutral-400">
+        <span id="count"></span>
+      </div>
+      {prompts.length === 0 ? (
+        <div class="card p-6">
+          <p>Nessun prompt trovato. Verifica la connessione a WPGraphQL e che il CPT <code>prompt</code> sia esposto.</p>
+        </div>
+      ) : (
+        <div id="grid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {prompts.map((p) => {
+            const cats = (p?.categories?.nodes ?? []).map((c) => c.name).join('|')
+            const tgs  = (p?.tags?.nodes ?? []).map((t) => t.name).join('|')
+            const textBlob = [p?.title, p?.excerpt, p?.content, p?.promptFields?.promptText].filter(Boolean).join(' ').replace(/<[^>]+>/g,' ')
+            return (
+              <PromptCard
+                prompt={p}
+                data-cats={cats}
+                data-tags={tgs}
+                data-textblob={textBlob.toLowerCase()}
+              />
+            )
+          })}
+        </div>
+      )}
+    </div>
+  </section>
+
+  <script is:inline>
+    const grid = document.getElementById('grid')
+    const search = document.getElementById('search')
+    const clearBtn = document.getElementById('clear-filters')
+    const count = document.getElementById('count')
+    const catWrap = document.getElementById('filters-categories')
+    const tagWrap = document.getElementById('filters-tags')
+
+    const getChecked = (wrap) => {
+      if (!wrap) return []
+      return Array.from(wrap.querySelectorAll('input[type="checkbox"]:checked')).map(i => i.value)
+    }
+
+    const apply = () => {
+      if (!grid) return
+      const q = (search?.value || '').trim().toLowerCase()
+      const cats = getChecked(catWrap)
+      const tags = getChecked(tagWrap)
+
+      let visible = 0
+      for (const card of grid.children) {
+        const blob = card.getAttribute('data-textblob') || ''
+        const cardCats = (card.getAttribute('data-cats') || '').split('|').filter(Boolean)
+        const cardTags = (card.getAttribute('data-tags') || '').split('|').filter(Boolean)
+
+        const matchQ = q ? blob.includes(q) : true
+        const matchCats = cats.length ? cats.every(c => cardCats.includes(c)) : true
+        const matchTags = tags.length ? tags.every(t => cardTags.includes(t)) : true
+
+        const show = matchQ && matchCats && matchTags
+        card.classList.toggle('hidden', !show)
+        if (show) visible++
+      }
+      if (count) count.textContent = `${visible} risultati`
+    }
+
+    search?.addEventListener('input', apply)
+    catWrap?.addEventListener('change', apply)
+    tagWrap?.addEventListener('change', apply)
+    clearBtn?.addEventListener('click', () => {
+      search.value = ''
+      for (const wrap of [catWrap, tagWrap]) {
+        if (!wrap) continue
+        wrap.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false)
+      }
+      apply()
+    })
+
+    // Copy prompt delegato
+    document.addEventListener('click', async (e) => {
+      const btn = (e.target)?.closest?.('[data-copy]')
+      if (!btn) return
+      const text = btn.getAttribute('data-text') || ''
+      if (!text) return
+      try {
+        await navigator.clipboard.writeText(text)
+        btn.classList.add('opacity-70')
+        setTimeout(() => btn.classList.remove('opacity-70'), 600)
+      } catch (err) {
+        console.error('Copy failed', err)
+      }
+    })
+
+    // Init
+    apply()
+  </script>
+</Base>
