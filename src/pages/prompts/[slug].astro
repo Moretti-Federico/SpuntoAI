@@ -1,0 +1,82 @@
+---
+import Base from '../../layouts/Base.astro'
+import { fetchGraphQL } from '../../lib/graphql'
+import { GET_PROMPT_BY_SLUG, GET_PROMPT_SLUGS } from '../../lib/queries'
+
+export async function getStaticPaths() {
+  const slugs: string[] = []
+  let after: string | null = null
+  let hasNext = true
+  try {
+    while (hasNext) {
+      const data: any = await fetchGraphQL(GET_PROMPT_SLUGS, { first: 200, after })
+      const nodes = data?.prompts?.nodes ?? []
+      slugs.push(...nodes.map((n: any) => n.slug))
+      hasNext = !!data?.prompts?.pageInfo?.hasNextPage
+      after = data?.prompts?.pageInfo?.endCursor ?? null
+      if (!after) break
+    }
+  } catch {}
+  return slugs.map((slug) => ({ params: { slug } }))
+}
+
+const { slug } = Astro.params
+const data: any = await fetchGraphQL(GET_PROMPT_BY_SLUG, { slug })
+const prompt = data?.prompt
+---
+
+<Base title={prompt?.title ? `${prompt.title} — SpuntoAI` : 'Prompt — SpuntoAI'}>
+  { !prompt ? (
+    <div class="card p-6">
+      <h1 class="text-xl font-semibold mb-2">Prompt non trovato</h1>
+      <p class="text-neutral-400">Controlla lo slug o rigenera la build.</p>
+      <a class="btn mt-4" href="/">Torna alla lista</a>
+    </div>
+  ) : (
+    <>
+      <div class="mb-6">
+        <a href="/" class="text-neutral-400 hover:text-white text-sm">← Torna alla lista</a>
+      </div>
+
+      <article class="prose prose-invert max-w-none">
+        <h1 class="!mb-2">{prompt.title}</h1>
+        <p class="text-sm text-neutral-400 !mt-0">Pubblicato il {new Date(prompt.date).toLocaleDateString('it-IT')}</p>
+      </article>
+
+      {prompt?.featuredImage?.node?.sourceUrl && (
+        <img class="my-5 rounded-lg border border-neutral-800" src={prompt.featuredImage.node.sourceUrl} alt={prompt.featuredImage.node.altText || prompt.title} />
+      )}
+
+      {prompt?.content && <div class="prose prose-invert max-w-none" set:html={prompt.content} />}
+
+      {prompt?.promptFields?.promptText && (
+        <section class="mt-6">
+          <h2 class="text-lg font-semibold mb-3">Prompt</h2>
+          <pre class="card p-4 overflow-x-auto whitespace-pre-wrap"><code>{prompt.promptFields.promptText}</code></pre>
+          <div class="mt-3">
+            <button class="btn bg-neutral-800 border border-neutral-700 text-neutral-100" id="copy-detail" data-text={prompt.promptFields.promptText}>Copia prompt</button>
+          </div>
+        </section>
+      )}
+
+      {(prompt?.categories?.nodes?.length || prompt?.tags?.nodes?.length) && (
+        <section class="mt-6 text-sm text-neutral-300">
+          <div class="flex flex-wrap gap-2">
+            {(prompt.categories?.nodes ?? []).map((c: any) => <span class="badge">{c.name}</span>)}
+            {(prompt.tags?.nodes ?? []).map((t: any) => <span class="badge opacity-80">#{t.name}</span>)}
+          </div>
+        </section>
+      )}
+    </>
+  )}
+  <script is:inline>
+    const btn = document.getElementById('copy-detail')
+    btn?.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-text') || ''
+      if (!text) return
+      await navigator.clipboard.writeText(text)
+      btn.classList.add('opacity-70')
+      setTimeout(() => btn.classList.remove('opacity-70'), 600)
+    })
+  </script>
+</Base>
