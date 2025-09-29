@@ -1,0 +1,29 @@
+---
+const { prompt, ...rest } = Astro.props
+const img = prompt?.featuredImage?.node?.sourceUrl
+const alt = prompt?.featuredImage?.node?.altText || prompt?.title || 'Prompt'
+const tags = (prompt?.tags?.nodes || []).map((t: any) => t.name)
+const cats = (prompt?.categories?.nodes || []).map((c: any) => c.name)
+const pText = prompt?.promptFields?.promptText || ''
+---
+<article class="card p-4 flex flex-col gap-3" {...rest}>
+  <a href={`/prompts/${prompt.slug}`} class="block">
+    <h3 class="text-lg font-semibold leading-tight">{prompt.title}</h3>
+  </a>
+  {
+    img && (
+      <a href={`/prompts/${prompt.slug}`} class="block rounded-lg overflow-hidden border border-neutral-800">
+        <img src={img} alt={alt} loading="lazy" class="w-full h-40 object-cover" />
+      </a>
+    )
+  }
+  {prompt.excerpt && <div class="prose prose-invert prose-sm max-w-none" set:html={prompt.excerpt} />}
+  <div class="flex flex-wrap gap-2">
+    {cats.map((c: string) => <span class="badge">{c}</span>)}
+    {tags.map((t: string) => <span class="badge opacity-80">#{t}</span>)}
+  </div>
+  <div class="flex items-center gap-2 mt-auto">
+    <a href={`/prompts/${prompt.slug}`} class="btn">Apri</a>
+    {pText && <button class="btn bg-neutral-800 border border-neutral-700 text-neutral-100" data-copy data-text={pText}>Copia prompt</button>}
+  </div>
+</article>
